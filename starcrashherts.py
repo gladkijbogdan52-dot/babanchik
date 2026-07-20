@@ -5,6 +5,7 @@ import pygame
 
 BASE_DIR = Path(__file__).resolve().parent
 BACKGROUND_PATH = BASE_DIR / "assets" / "main_menu_background.png"
+TITLE_IMAGE_PATH = BASE_DIR / "New Piskel (18).gif"
 
 WIDTH = 1280
 HEIGHT = 720
@@ -50,7 +51,7 @@ def make_button_rects(screen_rect):
     ]
 
 
-def draw_menu(screen, background, background_pos, title_font, item_font, selected_index):
+def draw_menu(screen, background, background_pos, title_font, item_font, selected_index, title_image):
     screen.blit(background, background_pos)
 
     shade = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
@@ -59,7 +60,11 @@ def draw_menu(screen, background, background_pos, title_font, item_font, selecte
     screen.blit(shade, (0, 0))
 
     screen_rect = screen.get_rect()
-    draw_text(screen, TITLE, title_font, (230, 245, 245), (screen_rect.centerx, 170))
+    if title_image is not None:
+        image_rect = title_image.get_rect(center=(screen_rect.centerx, 170))
+        screen.blit(title_image, image_rect)
+    else:
+        draw_text(screen, TITLE, title_font, (230, 245, 245), (screen_rect.centerx, 170))
     draw_text(
         screen,
         "SURVIVE THE CRASH",
@@ -98,6 +103,11 @@ def run_menu():
     background_source = pygame.image.load(BACKGROUND_PATH).convert()
     background, background_pos = scale_to_fill(background_source, screen.get_size())
 
+    try:
+        title_image = pygame.image.load(TITLE_IMAGE_PATH).convert_alpha()
+    except pygame.error:
+        title_image = None
+
     title_font = pygame.font.SysFont("consolas", 76, bold=True)
     item_font = pygame.font.SysFont("consolas", 28, bold=True)
     selected_index = 0
@@ -111,6 +121,7 @@ def run_menu():
             title_font,
             item_font,
             selected_index,
+            title_image,
         )
 
         for event in pygame.event.get():
