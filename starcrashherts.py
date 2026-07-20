@@ -33,11 +33,40 @@ def draw_text(screen, text, font, color, center):
     return rect
 
 
+def load_gif_animation(path):
+    try:
+        raw_frames = pygame.image.load_animation(path)
+    except (FileNotFoundError, pygame.error):
+        return []
+
+    frames = []
+    for surface, duration in raw_frames:
+        delay_ms = max(16, int(duration))
+        frames.append((surface.convert_alpha(), delay_ms))
+    return frames
+
+
+def get_animation_frame(frames, elapsed_ms):
+    if not frames:
+        return None
+
+    total_duration = sum(duration for _, duration in frames)
+    if total_duration <= 0:
+        return frames[0][0]
+
+    frame_time = elapsed_ms % total_duration
+    for surface, duration in frames:
+        if frame_time < duration:
+            return surface
+        frame_time -= duration
+
+    return frames[-1][0]
+
+
 def make_button_rects(screen_rect):
     button_width = 280
     button_height = 56
     gap = 16
-    total_height = len(MENU_ITEMS) * button_height + (len(MENU_ITEMS) - 1) * gap
     top = screen_rect.centery + 52
 
     return [
@@ -103,17 +132,19 @@ def run_menu():
     background_source = pygame.image.load(BACKGROUND_PATH).convert()
     background, background_pos = scale_to_fill(background_source, screen.get_size())
 
-    try:
-        title_image = pygame.image.load(TITLE_IMAGE_PATH).convert_alpha()
-    except pygame.error:
-        title_image = None
+    title_animation = load_gif_animation(TITLE_IMAGE_PATH)
 
     title_font = pygame.font.SysFont("consolas", 76, bold=True)
     item_font = pygame.font.SysFont("consolas", 28, bold=True)
     selected_index = 0
     running = True
+    animation_started_at = pygame.time.get_ticks()
 
     while running:
+        title_image = get_animation_frame(
+            title_animation,
+            pygame.time.get_ticks() - animation_started_at,
+        )
         selected_index, button_rects = draw_menu(
             screen,
             background,
