@@ -4,7 +4,7 @@ import pygame
 
 
 BASE_DIR = Path(__file__).resolve().parent
-BACKGROUND_PATH = BASE_DIR / "assets" / "main_menu_background.png"
+BACKGROUND_PATH = BASE_DIR / "задний фон меню.png"
 TITLE_IMAGE_PATH = BASE_DIR / "New Piskel (18).gif"
 START_BUTTON_PATH = BASE_DIR / "start.gif"
 SETTINGS_BUTTON_PATH = BASE_DIR / "settings.gif"
@@ -128,7 +128,7 @@ def make_button_rects(screen_rect):
     button_width = 280
     button_height = 56
     gap = 16
-    top = screen_rect.centery + 52
+    top = screen_rect.centery + 7
 
     return [
         pygame.Rect(
@@ -164,17 +164,8 @@ def draw_menu(
     if title_image is not None:
         image_rect = title_image.get_rect(center=(screen_rect.centerx, 165))
         screen.blit(title_image, image_rect)
-        subtitle_y = image_rect.bottom + 20
     else:
         draw_text(screen, TITLE, title_font, (230, 245, 245), (screen_rect.centerx, 170))
-        subtitle_y = 236
-    draw_text(
-        screen,
-        "SURVIVE THE CRASH",
-        item_font,
-        (119, 214, 203),
-        (screen_rect.centerx, subtitle_y),
-    )
 
     mouse_pos = pygame.mouse.get_pos()
     button_rects = make_button_rects(screen_rect)
