@@ -41,36 +41,20 @@ def draw_text(screen, text, font, color, center):
 
 
 def load_gif_animation(path):
-    """Load every GIF frame as a pygame surface.
-
-    pygame can load a GIF as a single image, but it has no
-    ``pygame.image.load_animation`` function. Pillow is used here to decode
-    the animation and its per-frame delays.
-    """
     try:
-        from PIL import Image
-    except ImportError:
-        # Keep the menu usable when Pillow is not installed. In that case
-        # pygame displays the first GIF frame as a static title.
+        raw_frames = pygame.image.load_animation(str(path))
+    except (FileNotFoundError, pygame.error, AttributeError):
         try:
             return [(pygame.image.load(str(path)).convert_alpha(), 1000)]
         except (FileNotFoundError, pygame.error):
             return []
 
     frames = []
-    try:
-        with Image.open(path) as animation:
-            for frame_number in range(getattr(animation, "n_frames", 1)):
-                animation.seek(frame_number)
-                rgba_frame = animation.convert("RGBA")
-                surface = pygame.image.frombytes(
-                    rgba_frame.tobytes(),
-                    rgba_frame.size,
-                    "RGBA",
-                ).convert_alpha()
-                delay_ms = max(16, int(animation.info.get("duration", 100)))
-                frames.append((surface, delay_ms))
-    except (FileNotFoundError, OSError):
+    for surface, duration in raw_frames:
+        delay_ms = max(16, int(duration))
+        frames.append((surface.convert_alpha(), delay_ms))
+
+    if not frames:
         return []
 
     return frames
