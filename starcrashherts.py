@@ -115,10 +115,29 @@ def draw_menu(screen, background, background_pos, title_font, item_font, selecte
         fill = (15, 29, 33, 210) if active else (9, 17, 21, 170)
         border = (244, 139, 46) if active else (69, 110, 116)
         text_color = (255, 230, 185) if active else (202, 220, 220)
+        button_rect = rect.inflate(18, 10) if active else rect.copy()
+        if active:
+            button_rect.move_ip(0, -4)
 
-        pygame.draw.rect(screen, fill, rect, border_radius=6)
-        pygame.draw.rect(screen, border, rect, width=2, border_radius=6)
-        draw_text(screen, label, item_font, text_color, rect.center)
+        shadow_offset = 9 if active else 4
+        shadow_rect = button_rect.move(0, shadow_offset)
+        pygame.draw.rect(screen, (0, 0, 0, 170), shadow_rect, border_radius=7)
+
+        if active:
+            glow_rect = button_rect.inflate(8, 6)
+            pygame.draw.rect(screen, (244, 139, 46), glow_rect, width=1, border_radius=8)
+
+        pygame.draw.rect(screen, fill, button_rect, border_radius=6)
+        pygame.draw.rect(screen, border, button_rect, width=2, border_radius=6)
+        if active:
+            pygame.draw.line(
+                screen,
+                (255, 226, 152),
+                (button_rect.left + 14, button_rect.top + 5),
+                (button_rect.right - 14, button_rect.top + 5),
+                2,
+            )
+        draw_text(screen, label, item_font, text_color, button_rect.center)
 
     return hovered_index, button_rects
 
