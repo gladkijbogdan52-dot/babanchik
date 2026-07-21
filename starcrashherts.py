@@ -6,6 +6,9 @@ import pygame
 BASE_DIR = Path(__file__).resolve().parent
 BACKGROUND_PATH = BASE_DIR / "assets" / "main_menu_background.png"
 TITLE_IMAGE_PATH = BASE_DIR / "New Piskel (18).gif"
+START_BUTTON_PATH = BASE_DIR / "start.gif"
+SETTINGS_BUTTON_PATH = BASE_DIR / "settings.gif"
+EXIT_BUTTON_PATH = BASE_DIR / "exit.gif"
 
 WIDTH = 1280
 HEIGHT = 720
@@ -13,6 +16,10 @@ FPS = 60
 
 TITLE = "STAR CRASH"
 MENU_ITEMS = ("START", "SETTINGS", "EXIT")
+TITLE_IMAGE_WIDTH = 450
+START_BUTTON_WIDTH = 280
+SETTINGS_BUTTON_WIDTH = 280
+EXIT_BUTTON_WIDTH = 280
 
 
 def scale_to_fill(surface, size):
@@ -34,15 +41,38 @@ def draw_text(screen, text, font, color, center):
 
 
 def load_gif_animation(path):
+    """Load every GIF frame as a pygame surface.
+
+    pygame can load a GIF as a single image, but it has no
+    ``pygame.image.load_animation`` function. Pillow is used here to decode
+    the animation and its per-frame delays.
+    """
     try:
-        raw_frames = pygame.image.load_animation(path)
-    except (FileNotFoundError, pygame.error):
-        return []
+        from PIL import Image
+    except ImportError:
+        # Keep the menu usable when Pillow is not installed. In that case
+        # pygame displays the first GIF frame as a static title.
+        try:
+            return [(pygame.image.load(str(path)).convert_alpha(), 1000)]
+        except (FileNotFoundError, pygame.error):
+            return []
 
     frames = []
-    for surface, duration in raw_frames:
-        delay_ms = max(16, int(duration))
-        frames.append((surface.convert_alpha(), delay_ms))
+    try:
+        with Image.open(path) as animation:
+            for frame_number in range(getattr(animation, "n_frames", 1)):
+                animation.seek(frame_number)
+                rgba_frame = animation.convert("RGBA")
+                surface = pygame.image.frombytes(
+                    rgba_frame.tobytes(),
+                    rgba_frame.size,
+                    "RGBA",
+                ).convert_alpha()
+                delay_ms = max(16, int(animation.info.get("duration", 100)))
+                frames.append((surface, delay_ms))
+    except (FileNotFoundError, OSError):
+        return []
+
     return frames
 
 
@@ -63,6 +93,37 @@ def get_animation_frame(frames, elapsed_ms):
     return frames[-1][0]
 
 
+def scale_animation_frames(frames, target_width):
+    if not frames:
+        return []
+
+    source_width, source_height = frames[0][0].get_size()
+    scale = target_width / source_width
+    target_size = (target_width, round(source_height * scale))
+    return [
+        (pygame.transform.scale(surface, target_size), duration)
+        for surface, duration in frames
+    ]
+
+
+def trim_animation_frames(frames):
+    """Remove transparent margins while keeping every frame aligned."""
+    if not frames:
+        return []
+
+    bounds = frames[0][0].get_bounding_rect(min_alpha=1)
+    for surface, _ in frames[1:]:
+        bounds.union_ip(surface.get_bounding_rect(min_alpha=1))
+
+    if bounds.width == 0 or bounds.height == 0:
+        return frames
+
+    return [
+        (surface.subsurface(bounds).copy(), duration)
+        for surface, duration in frames
+    ]
+
+
 def make_button_rects(screen_rect):
     button_width = 280
     button_height = 56
@@ -80,7 +141,18 @@ def make_button_rects(screen_rect):
     ]
 
 
-def draw_menu(screen, background, background_pos, title_font, item_font, selected_index, title_image):
+def draw_menu(
+    screen,
+    background,
+    background_pos,
+    title_font,
+    item_font,
+    selected_index,
+    title_image,
+    start_image,
+    settings_image,
+    exit_image,
+):
     screen.blit(background, background_pos)
 
     shade = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
@@ -90,20 +162,43 @@ def draw_menu(screen, background, background_pos, title_font, item_font, selecte
 
     screen_rect = screen.get_rect()
     if title_image is not None:
-        image_rect = title_image.get_rect(center=(screen_rect.centerx, 170))
+        image_rect = title_image.get_rect(center=(screen_rect.centerx, 165))
         screen.blit(title_image, image_rect)
+        subtitle_y = image_rect.bottom + 20
     else:
         draw_text(screen, TITLE, title_font, (230, 245, 245), (screen_rect.centerx, 170))
+        subtitle_y = 236
     draw_text(
         screen,
         "SURVIVE THE CRASH",
         item_font,
         (119, 214, 203),
-        (screen_rect.centerx, 236),
+        (screen_rect.centerx, subtitle_y),
     )
 
     mouse_pos = pygame.mouse.get_pos()
     button_rects = make_button_rects(screen_rect)
+    custom_button_images = {
+        "START": start_image,
+        "SETTINGS": settings_image,
+        "EXIT": exit_image,
+    }
+    custom_button_offsets = {
+        "START": -20,
+        "SETTINGS": 4,
+        "EXIT": 32,
+    }
+    for label, button_image in custom_button_images.items():
+        if button_image is None:
+            continue
+        index = MENU_ITEMS.index(label)
+        original_rect = button_rects[index]
+        button_rects[index] = button_image.get_rect(
+            center=(
+                original_rect.centerx,
+                original_rect.centery + custom_button_offsets[label],
+            ),
+        )
 
     hovered_index = selected_index
     for index, rect in enumerate(button_rects):
@@ -112,6 +207,19 @@ def draw_menu(screen, background, background_pos, title_font, item_font, selecte
 
     for index, (label, rect) in enumerate(zip(MENU_ITEMS, button_rects)):
         active = index == hovered_index
+
+        button_image = custom_button_images.get(label)
+        if button_image is not None:
+            if active:
+                width, height = button_image.get_size()
+                button_image = pygame.transform.scale(
+                    button_image,
+                    (round(width * 1.06), round(height * 1.06)),
+                )
+            image_rect = button_image.get_rect(center=rect.center)
+            screen.blit(button_image, image_rect)
+            continue
+
         fill = (15, 29, 33, 210) if active else (9, 17, 21, 170)
         border = (244, 139, 46) if active else (69, 110, 116)
         text_color = (255, 230, 185) if active else (202, 220, 220)
@@ -151,7 +259,22 @@ def run_menu():
     background_source = pygame.image.load(BACKGROUND_PATH).convert()
     background, background_pos = scale_to_fill(background_source, screen.get_size())
 
-    title_animation = load_gif_animation(TITLE_IMAGE_PATH)
+    title_animation = scale_animation_frames(
+        load_gif_animation(TITLE_IMAGE_PATH),
+        TITLE_IMAGE_WIDTH,
+    )
+    start_animation = scale_animation_frames(
+        trim_animation_frames(load_gif_animation(START_BUTTON_PATH)),
+        START_BUTTON_WIDTH,
+    )
+    settings_animation = scale_animation_frames(
+        trim_animation_frames(load_gif_animation(SETTINGS_BUTTON_PATH)),
+        SETTINGS_BUTTON_WIDTH,
+    )
+    exit_animation = scale_animation_frames(
+        trim_animation_frames(load_gif_animation(EXIT_BUTTON_PATH)),
+        EXIT_BUTTON_WIDTH,
+    )
 
     title_font = pygame.font.SysFont("consolas", 76, bold=True)
     item_font = pygame.font.SysFont("consolas", 28, bold=True)
@@ -164,6 +287,18 @@ def run_menu():
             title_animation,
             pygame.time.get_ticks() - animation_started_at,
         )
+        start_image = get_animation_frame(
+            start_animation,
+            pygame.time.get_ticks() - animation_started_at,
+        )
+        settings_image = get_animation_frame(
+            settings_animation,
+            pygame.time.get_ticks() - animation_started_at,
+        )
+        exit_image = get_animation_frame(
+            exit_animation,
+            pygame.time.get_ticks() - animation_started_at,
+        )
         selected_index, button_rects = draw_menu(
             screen,
             background,
@@ -172,6 +307,9 @@ def run_menu():
             item_font,
             selected_index,
             title_image,
+            start_image,
+            settings_image,
+            exit_image,
         )
 
         for event in pygame.event.get():
