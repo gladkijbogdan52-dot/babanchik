@@ -4,11 +4,13 @@ import pygame
 
 
 BASE_DIR = Path(__file__).resolve().parent
+SAVE_SLOTS_BACKGROUND_PATH = BASE_DIR / "assets" / "save_slots_background.png"
 BACKGROUND_PATH = BASE_DIR / "задний фон меню.png"
 TITLE_IMAGE_PATH = BASE_DIR / "New Piskel (18).gif"
 START_BUTTON_PATH = BASE_DIR / "start.gif"
 SETTINGS_BUTTON_PATH = BASE_DIR / "settings.gif"
 EXIT_BUTTON_PATH = BASE_DIR / "exit.gif"
+SLOTS_DIR = BASE_DIR / "slots"
 
 WIDTH = 1280
 HEIGHT = 720
@@ -20,6 +22,7 @@ TITLE_IMAGE_WIDTH = 450
 START_BUTTON_WIDTH = 280
 SETTINGS_BUTTON_WIDTH = 280
 EXIT_BUTTON_WIDTH = 280
+SAVE_SLOT_LABEL_WIDTH = 180
 SAVE_SLOT_COUNT = 4
 FADE_DURATION_MS = 450
 
@@ -149,13 +152,16 @@ def make_save_slot_rects(screen_rect):
 
 def draw_save_slots(
     screen,
+    background,
+    background_pos,
     heading_font,
     slot_font,
     info_font,
     selected_index,
     confirmed_index,
+    slot_images,
 ):
-    screen.fill((0, 0, 0))
+    screen.blit(background, background_pos)
     screen_rect = screen.get_rect()
 
     draw_text(
@@ -202,13 +208,26 @@ def draw_save_slots(
                 border_radius=12,
             )
 
-        draw_text(
-            screen,
-            f"SLOT {index + 1}",
-            slot_font,
-            (255, 230, 185) if active else (205, 220, 220),
-            (card_rect.centerx, card_rect.centery - 18),
-        )
+        slot_image = slot_images[index] if index < len(slot_images) else None
+        if slot_image is not None:
+            if active:
+                width, height = slot_image.get_size()
+                slot_image = pygame.transform.scale(
+                    slot_image,
+                    (round(width * 1.04), round(height * 1.04)),
+                )
+            image_rect = slot_image.get_rect(
+                center=(card_rect.centerx, card_rect.centery - 18)
+            )
+            screen.blit(slot_image, image_rect)
+        else:
+            draw_text(
+                screen,
+                f"SLOT {index + 1}",
+                slot_font,
+                (255, 230, 185) if active else (205, 220, 220),
+                (card_rect.centerx, card_rect.centery - 18),
+            )
         draw_text(
             screen,
             "SELECTED" if confirmed else "EMPTY",
@@ -335,6 +354,11 @@ def run_menu():
 
     background_source = pygame.image.load(BACKGROUND_PATH).convert()
     background, background_pos = scale_to_fill(background_source, screen.get_size())
+    save_slots_background_source = pygame.image.load(SAVE_SLOTS_BACKGROUND_PATH).convert()
+    save_slots_background, save_slots_background_pos = scale_to_fill(
+        save_slots_background_source,
+        screen.get_size(),
+    )
 
     title_animation = scale_animation_frames(
         load_gif_animation(TITLE_IMAGE_PATH),
@@ -352,6 +376,13 @@ def run_menu():
         trim_animation_frames(load_gif_animation(EXIT_BUTTON_PATH)),
         EXIT_BUTTON_WIDTH,
     )
+    slot_label_animations = [
+        scale_animation_frames(
+            trim_animation_frames(load_gif_animation(SLOTS_DIR / f"{index}.gif")),
+            SAVE_SLOT_LABEL_WIDTH,
+        )
+        for index in range(1, SAVE_SLOT_COUNT + 1)
+    ]
 
     title_font = pygame.font.SysFont("consolas", 76, bold=True)
     item_font = pygame.font.SysFont("consolas", 28, bold=True)
@@ -389,6 +420,10 @@ def run_menu():
             exit_animation,
             now - animation_started_at,
         )
+        slot_images = [
+            get_animation_frame(animation, now - animation_started_at)
+            for animation in slot_label_animations
+        ]
 
         button_rects = []
         slot_rects = []
@@ -408,11 +443,14 @@ def run_menu():
         else:
             selected_slot_index, slot_rects = draw_save_slots(
                 screen,
+                save_slots_background,
+                save_slots_background_pos,
                 save_heading_font,
                 save_slot_font,
                 save_info_font,
                 selected_slot_index,
                 confirmed_slot_index,
+                slot_images,
             )
 
         if transition_phase is not None:
