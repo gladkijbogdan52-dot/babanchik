@@ -3,7 +3,6 @@ import random
 from pathlib import Path
 
 import pygame
-from PIL import Image, ImageSequence
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -81,33 +80,20 @@ def draw_text(screen, text, font, color, center):
 
 
 def load_gif_animation(path):
-    """Load every GIF frame with its own delay.
-
-    pygame.image.load() only returns the first GIF frame, while
-    pygame.image.load_animation() is not part of regular Pygame.
-    """
     try:
-        frames = []
-        with Image.open(path) as image:
-            default_duration = max(16, int(image.info.get("duration", 100)))
-            for frame in ImageSequence.Iterator(image):
-                rgba_frame = frame.convert("RGBA")
-                surface = pygame.image.fromstring(
-                    rgba_frame.tobytes(),
-                    rgba_frame.size,
-                    "RGBA",
-                ).convert_alpha()
-                duration = max(
-                    16,
-                    int(frame.info.get("duration", default_duration)),
-                )
-                frames.append((surface, duration))
-        return frames
-    except (FileNotFoundError, OSError, ValueError, pygame.error):
+        raw_frames = pygame.image.load_animation(str(path))
+    except (FileNotFoundError, pygame.error, AttributeError):
         try:
             return [(pygame.image.load(str(path)).convert_alpha(), 1000)]
         except (FileNotFoundError, pygame.error):
             return []
+
+    frames = []
+    for surface, duration in raw_frames:
+        delay_ms = max(16, int(duration))
+        frames.append((surface.convert_alpha(), delay_ms))
+
+    return frames
 
 
 def create_ambient_stars(background_source, screen_size, background_pos):
