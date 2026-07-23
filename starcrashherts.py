@@ -1,15 +1,21 @@
+import math
+import random
 from pathlib import Path
 
 import pygame
+from PIL import Image, ImageSequence
 
 
 BASE_DIR = Path(__file__).resolve().parent
 SAVE_SLOTS_BACKGROUND_PATH = BASE_DIR / "assets" / "save_slots_background.png"
+SAVE_SLOT_BUTTON_BACKGROUND_PATH = BASE_DIR / "задний фон кнопки в слотах.gif"
 BACKGROUND_PATH = BASE_DIR / "задний фон меню.png"
 TITLE_IMAGE_PATH = BASE_DIR / "New Piskel (18).gif"
 START_BUTTON_PATH = BASE_DIR / "start.gif"
 SETTINGS_BUTTON_PATH = BASE_DIR / "settings.gif"
 EXIT_BUTTON_PATH = BASE_DIR / "exit.gif"
+CURSOR_PATH = BASE_DIR / "курсор.gif"
+PRESSED_CURSOR_PATH = BASE_DIR / "зажатый курсор.gif"
 SLOTS_DIR = BASE_DIR / "slots"
 
 WIDTH = 1280
@@ -22,9 +28,38 @@ TITLE_IMAGE_WIDTH = 450
 START_BUTTON_WIDTH = 280
 SETTINGS_BUTTON_WIDTH = 280
 EXIT_BUTTON_WIDTH = 280
+CURSOR_WIDTH = 24
+SAVE_SLOT_BUTTON_WIDTH = 330
 SAVE_SLOT_LABEL_WIDTH = 180
 SAVE_SLOT_COUNT = 4
 FADE_DURATION_MS = 450
+COSMIC_MOTE_COUNT = 18
+SHOOTING_STAR_CYCLE_MS = 6500
+SHOOTING_STAR_DURATION_MS = 950
+BACKGROUND_STAR_POINTS = (
+    (141, 55, 2),
+    (497, 56, 2),
+    (363, 78, 2),
+    (654, 90, 2),
+    (928, 90, 2),
+    (1233, 95, 3),
+    (204, 143, 1),
+    (1148, 150, 2),
+    (1594, 189, 1),
+    (838, 195, 2),
+    (82, 200, 2),
+    (1050, 239, 3),
+    (260, 256, 3),
+    (428, 285, 2),
+    (1320, 294, 2),
+    (1565, 327, 2),
+    (1192, 378, 1),
+    (568, 419, 2),
+    (941, 430, 1),
+    (1315, 441, 2),
+    (371, 471, 2),
+    (1594, 470, 2),
+)
 
 
 def scale_to_fill(surface, size):
@@ -46,23 +81,210 @@ def draw_text(screen, text, font, color, center):
 
 
 def load_gif_animation(path):
+    """Load every GIF frame with its own delay.
+
+    pygame.image.load() only returns the first GIF frame, while
+    pygame.image.load_animation() is not part of regular Pygame.
+    """
     try:
-        raw_frames = pygame.image.load_animation(str(path))
-    except (FileNotFoundError, pygame.error, AttributeError):
+        frames = []
+        with Image.open(path) as image:
+            default_duration = max(16, int(image.info.get("duration", 100)))
+            for frame in ImageSequence.Iterator(image):
+                rgba_frame = frame.convert("RGBA")
+                surface = pygame.image.fromstring(
+                    rgba_frame.tobytes(),
+                    rgba_frame.size,
+                    "RGBA",
+                ).convert_alpha()
+                duration = max(
+                    16,
+                    int(frame.info.get("duration", default_duration)),
+                )
+                frames.append((surface, duration))
+        return frames
+    except (FileNotFoundError, OSError, ValueError, pygame.error):
         try:
             return [(pygame.image.load(str(path)).convert_alpha(), 1000)]
         except (FileNotFoundError, pygame.error):
             return []
 
-    frames = []
-    for surface, duration in raw_frames:
-        delay_ms = max(16, int(duration))
-        frames.append((surface.convert_alpha(), delay_ms))
 
-    if not frames:
-        return []
+def create_ambient_stars(background_source, screen_size, background_pos):
+    """Map the stars painted in the artwork to their exact screen positions."""
+    source_width, source_height = background_source.get_size()
+    width, height = screen_size
+    scale = max(width / source_width, height / source_height)
+    rng = random.Random(827)
+    stars = []
+    for source_x, source_y, size in BACKGROUND_STAR_POINTS:
+        brightest = max(
+            (
+                background_source.get_at((x, y))[:3]
+                for x in range(max(0, source_x - 3), min(source_width, source_x + 4))
+                for y in range(max(0, source_y - 3), min(source_height, source_y + 4))
+            ),
+            key=sum,
+        )
+        color = tuple(min(245, round(channel * 1.28 + 18)) for channel in brightest)
+        stars.append(
+            (
+                round(source_x * scale + background_pos[0]),
+                round(source_y * scale + background_pos[1]),
+                size,
+                rng.uniform(0.0, math.tau),
+                rng.uniform(1.55, 2.35),
+                color,
+            )
+        )
+    return stars
 
-    return frames
+
+def create_cosmic_motes(size):
+    """Create slow particles that rise only across the lower landscape."""
+    width, height = size
+    rng = random.Random(1409)
+    colors = (
+        (95, 155, 166),
+        (172, 139, 91),
+        (126, 155, 158),
+    )
+    motes = []
+    for _ in range(COSMIC_MOTE_COUNT):
+        motes.append(
+            (
+                rng.randrange(20, width - 20),
+                rng.uniform(0.0, height * 0.35),
+                rng.uniform(5.0, 12.0),
+                rng.uniform(0.0, math.tau),
+                rng.uniform(3.0, 9.0),
+                rng.choice((1, 1, 1, 2)),
+                rng.choice(colors),
+            )
+        )
+    return motes
+
+
+def draw_shooting_star(star_layer, elapsed_ms):
+    """Draw one short pixel meteor followed by a long quiet pause."""
+    cycle_index = elapsed_ms // SHOOTING_STAR_CYCLE_MS
+    cycle_time = elapsed_ms % SHOOTING_STAR_CYCLE_MS
+    if cycle_time >= SHOOTING_STAR_DURATION_MS:
+        return
+
+    progress = cycle_time / SHOOTING_STAR_DURATION_MS
+    visibility = math.sin(progress * math.pi) ** 0.7
+    width, _ = star_layer.get_size()
+    direction = -1 if cycle_index % 2 else 1
+
+    if direction > 0:
+        head_x = round(-70 + progress * 540)
+        head_y = round(82 + progress * 110)
+        trail_direction = (-1, -0.22)
+    else:
+        head_x = round(width + 70 - progress * 500)
+        head_y = round(118 + progress * 92)
+        trail_direction = (1, -0.22)
+
+    trail_length = 82
+    tail_x = round(head_x + trail_direction[0] * trail_length)
+    tail_y = round(head_y + trail_direction[1] * trail_length)
+    alpha = round(150 * visibility)
+    pygame.draw.line(
+        star_layer,
+        (166, 213, 220, round(alpha * 0.32)),
+        (tail_x, tail_y),
+        (head_x, head_y),
+        1,
+    )
+    pygame.draw.line(
+        star_layer,
+        (224, 239, 228, alpha),
+        (
+            round(head_x + trail_direction[0] * 24),
+            round(head_y + trail_direction[1] * 24),
+        ),
+        (head_x, head_y),
+        2,
+    )
+    pygame.draw.rect(
+        star_layer,
+        (242, 213, 156, round(210 * visibility)),
+        (head_x - 1, head_y - 1, 3, 3),
+    )
+
+
+def draw_animated_background(
+    screen,
+    background,
+    background_pos,
+    star_layer,
+    ambient_stars,
+    cosmic_motes,
+    elapsed_ms,
+):
+    """Draw the untouched artwork plus restrained pixel-art ambience."""
+    screen.blit(background, background_pos)
+    star_layer.fill((0, 0, 0, 0))
+    elapsed_seconds = elapsed_ms / 1000.0
+
+    for x, y, size, phase, speed, color in ambient_stars:
+        pulse = (math.sin(elapsed_seconds * speed + phase) + 1.0) / 2.0
+        alpha = round(5 + 225 * pulse**2.4)
+        if size == 3:
+            ray = 4 + round(pulse * 7)
+            ray_alpha = round(alpha * 0.72)
+            pygame.draw.line(
+                star_layer,
+                (*color, ray_alpha),
+                (x - ray, y),
+                (x + ray, y),
+            )
+            pygame.draw.line(
+                star_layer,
+                (*color, ray_alpha),
+                (x, y - ray),
+                (x, y + ray),
+            )
+        elif pulse > 0.48:
+            sparkle = (pulse - 0.48) / 0.52
+            ray = 2 + round(sparkle * (3 if size == 2 else 2))
+            ray_alpha = round(alpha * 0.62)
+            pygame.draw.line(
+                star_layer,
+                (*color, ray_alpha),
+                (x - ray, y),
+                (x + ray, y),
+            )
+            pygame.draw.line(
+                star_layer,
+                (*color, ray_alpha),
+                (x, y - ray),
+                (x, y + ray),
+            )
+        center_size = max(2, size)
+        pygame.draw.rect(
+            star_layer,
+            (*color, alpha),
+            (
+                x - center_size // 2,
+                y - center_size // 2,
+                center_size,
+                center_size,
+            ),
+        )
+
+    _, height = screen.get_size()
+    mote_travel = height * 0.35
+    for base_x, offset, speed, phase, drift, size, color in cosmic_motes:
+        travelled = (offset + elapsed_seconds * speed) % mote_travel
+        y = round(height - travelled)
+        x = round(base_x + math.sin(elapsed_seconds * 0.45 + phase) * drift)
+        fade = math.sin((travelled / mote_travel) * math.pi)
+        alpha = round(55 * fade)
+        pygame.draw.rect(star_layer, (*color, alpha), (x, y, size, size))
+
+    draw_shooting_star(star_layer, elapsed_ms)
 
 
 def get_animation_frame(frames, elapsed_ms):
@@ -100,11 +322,24 @@ def trim_animation_frames(frames):
     if not frames:
         return []
 
+    bounds = get_animation_bounds(frames)
+    return crop_animation_frames(frames, bounds)
+
+
+def get_animation_bounds(frames):
+    """Return shared visible bounds so related sprites keep their alignment."""
+    if not frames:
+        return pygame.Rect(0, 0, 0, 0)
+
     bounds = frames[0][0].get_bounding_rect(min_alpha=1)
     for surface, _ in frames[1:]:
         bounds.union_ip(surface.get_bounding_rect(min_alpha=1))
+    return bounds
 
-    if bounds.width == 0 or bounds.height == 0:
+
+def crop_animation_frames(frames, bounds):
+    """Crop animation frames to precomputed shared bounds."""
+    if not frames or bounds.width == 0 or bounds.height == 0:
         return frames
 
     return [
@@ -131,13 +366,13 @@ def make_button_rects(screen_rect):
 
 
 def make_save_slot_rects(screen_rect):
-    slot_width = 360
-    slot_height = 130
-    horizontal_gap = 36
-    vertical_gap = 28
+    slot_width = 330
+    slot_height = 108
+    horizontal_gap = 54
+    vertical_gap = 26
     grid_width = slot_width * 2 + horizontal_gap
     left = screen_rect.centerx - grid_width // 2
-    top = 205
+    top = 215
 
     return [
         pygame.Rect(
@@ -154,6 +389,7 @@ def draw_save_slots(
     screen,
     background,
     background_pos,
+    slot_button_background,
     heading_font,
     slot_font,
     info_font,
@@ -181,30 +417,41 @@ def draw_save_slots(
 
     mouse_pos = pygame.mouse.get_pos()
     slot_rects = make_save_slot_rects(screen_rect)
-    hovered_index = selected_index
+    # Hover is temporary and must not become the persistent slot selection.
+    hovered_index = None
     for index, rect in enumerate(slot_rects):
         if rect.collidepoint(mouse_pos):
             hovered_index = index
+            break
 
     for index, rect in enumerate(slot_rects):
         active = index == hovered_index
         confirmed = index == confirmed_index
-        fill = (17, 28, 31) if active else (7, 12, 14)
-        border = (244, 139, 46) if active else (57, 91, 95)
-        if confirmed:
-            border = (85, 216, 177)
-
-        card_rect = rect.inflate(10, 8) if active else rect
-        pygame.draw.rect(screen, fill, card_rect, border_radius=10)
-        pygame.draw.rect(screen, border, card_rect, width=3, border_radius=10)
-
-        if active:
-            glow_rect = card_rect.inflate(8, 8)
+        button_center = (rect.centerx, rect.top + 44)
+        button_image = slot_button_background
+        if button_image is not None:
+            if active:
+                width, height = button_image.get_size()
+                button_image = pygame.transform.scale(
+                    button_image,
+                    (round(width * 1.05), round(height * 1.05)),
+                )
+            button_rect = button_image.get_rect(center=button_center)
+            screen.blit(button_image, button_rect)
+        else:
+            button_rect = pygame.Rect(0, 0, SAVE_SLOT_BUTTON_WIDTH, 66)
+            button_rect.center = button_center
             pygame.draw.rect(
                 screen,
-                (244, 139, 46),
-                glow_rect,
-                width=1,
+                (7, 12, 14),
+                button_rect,
+                border_radius=12,
+            )
+            pygame.draw.rect(
+                screen,
+                (225, 235, 232),
+                button_rect,
+                width=2,
                 border_radius=12,
             )
 
@@ -217,7 +464,7 @@ def draw_save_slots(
                     (round(width * 1.04), round(height * 1.04)),
                 )
             image_rect = slot_image.get_rect(
-                center=(card_rect.centerx, card_rect.centery - 18)
+                center=button_center,
             )
             screen.blit(slot_image, image_rect)
         else:
@@ -226,15 +473,32 @@ def draw_save_slots(
                 f"SLOT {index + 1}",
                 slot_font,
                 (255, 230, 185) if active else (205, 220, 220),
-                (card_rect.centerx, card_rect.centery - 18),
+                button_center,
             )
+
+        status_color = (85, 216, 177) if confirmed else (93, 145, 148)
+        if active and not confirmed:
+            status_color = (244, 166, 91)
         draw_text(
             screen,
             "SELECTED" if confirmed else "EMPTY",
             info_font,
-            (85, 216, 177) if confirmed else (93, 145, 148),
-            (card_rect.centerx, card_rect.centery + 28),
+            status_color,
+            (rect.centerx, rect.bottom - 9),
         )
+
+        if confirmed:
+            marker_y = rect.bottom - 9
+            pygame.draw.rect(
+                screen,
+                (85, 216, 177),
+                (rect.centerx - 61, marker_y - 2, 4, 4),
+            )
+            pygame.draw.rect(
+                screen,
+                (85, 216, 177),
+                (rect.centerx + 57, marker_y - 2, 4, 4),
+            )
 
     draw_text(
         screen,
@@ -243,13 +507,17 @@ def draw_save_slots(
         (90, 105, 108),
         (screen_rect.centerx, 650),
     )
-    return hovered_index, slot_rects
+    return selected_index, slot_rects
 
 
 def draw_menu(
     screen,
     background,
     background_pos,
+    star_layer,
+    ambient_stars,
+    cosmic_motes,
+    elapsed_ms,
     title_font,
     item_font,
     selected_index,
@@ -258,12 +526,21 @@ def draw_menu(
     settings_image,
     exit_image,
 ):
-    screen.blit(background, background_pos)
+    draw_animated_background(
+        screen,
+        background,
+        background_pos,
+        star_layer,
+        ambient_stars,
+        cosmic_motes,
+        elapsed_ms,
+    )
 
     shade = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
     shade.fill((0, 0, 0, 72))
     pygame.draw.rect(shade, (0, 0, 0, 120), (0, 0, screen.get_width(), screen.get_height()))
     screen.blit(shade, (0, 0))
+    screen.blit(star_layer, (0, 0))
 
     screen_rect = screen.get_rect()
     if title_image is not None:
@@ -296,10 +573,13 @@ def draw_menu(
             ),
         )
 
-    hovered_index = selected_index
+    # Hover is temporary. It must not overwrite the keyboard selection,
+    # otherwise the last hovered button stays visually pressed.
+    hovered_index = None
     for index, rect in enumerate(button_rects):
         if rect.collidepoint(mouse_pos):
             hovered_index = index
+            break
 
     for index, (label, rect) in enumerate(zip(MENU_ITEMS, button_rects)):
         active = index == hovered_index
@@ -343,25 +623,39 @@ def draw_menu(
             )
         draw_text(screen, label, item_font, text_color, button_rect.center)
 
-    return hovered_index, button_rects
+    return selected_index, button_rects
 
 
 def run_menu():
     pygame.init()
     pygame.display.set_caption("Star Crash")
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.mouse.set_visible(False)
     clock = pygame.time.Clock()
 
     background_source = pygame.image.load(BACKGROUND_PATH).convert()
     background, background_pos = scale_to_fill(background_source, screen.get_size())
+    star_layer = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+    ambient_stars = create_ambient_stars(
+        background_source,
+        screen.get_size(),
+        background_pos,
+    )
+    cosmic_motes = create_cosmic_motes(screen.get_size())
     save_slots_background_source = pygame.image.load(SAVE_SLOTS_BACKGROUND_PATH).convert()
     save_slots_background, save_slots_background_pos = scale_to_fill(
         save_slots_background_source,
         screen.get_size(),
     )
+    save_slot_button_animation = scale_animation_frames(
+        trim_animation_frames(
+            load_gif_animation(SAVE_SLOT_BUTTON_BACKGROUND_PATH)
+        ),
+        SAVE_SLOT_BUTTON_WIDTH,
+    )
 
     title_animation = scale_animation_frames(
-        load_gif_animation(TITLE_IMAGE_PATH),
+        trim_animation_frames(load_gif_animation(TITLE_IMAGE_PATH)),
         TITLE_IMAGE_WIDTH,
     )
     start_animation = scale_animation_frames(
@@ -375,6 +669,19 @@ def run_menu():
     exit_animation = scale_animation_frames(
         trim_animation_frames(load_gif_animation(EXIT_BUTTON_PATH)),
         EXIT_BUTTON_WIDTH,
+    )
+    cursor_source_animation = load_gif_animation(CURSOR_PATH)
+    pressed_cursor_source_animation = load_gif_animation(PRESSED_CURSOR_PATH)
+    cursor_bounds = get_animation_bounds(
+        cursor_source_animation + pressed_cursor_source_animation
+    )
+    cursor_animation = scale_animation_frames(
+        crop_animation_frames(cursor_source_animation, cursor_bounds),
+        CURSOR_WIDTH,
+    )
+    pressed_cursor_animation = scale_animation_frames(
+        crop_animation_frames(pressed_cursor_source_animation, cursor_bounds),
+        CURSOR_WIDTH,
     )
     slot_label_animations = [
         scale_animation_frames(
@@ -424,6 +731,10 @@ def run_menu():
             get_animation_frame(animation, now - animation_started_at)
             for animation in slot_label_animations
         ]
+        slot_button_background = get_animation_frame(
+            save_slot_button_animation,
+            now - animation_started_at,
+        )
 
         button_rects = []
         slot_rects = []
@@ -432,6 +743,10 @@ def run_menu():
                 screen,
                 background,
                 background_pos,
+                star_layer,
+                ambient_stars,
+                cosmic_motes,
+                now - animation_started_at,
                 title_font,
                 item_font,
                 selected_index,
@@ -445,6 +760,7 @@ def run_menu():
                 screen,
                 save_slots_background,
                 save_slots_background_pos,
+                slot_button_background,
                 save_heading_font,
                 save_slot_font,
                 save_info_font,
@@ -535,6 +851,19 @@ def run_menu():
                         confirmed_slot_index = index
                         print(f"SAVE SLOT {index + 1} selected")
                         break
+
+        if pygame.mouse.get_focused():
+            cursor_frames = (
+                pressed_cursor_animation
+                if pygame.mouse.get_pressed()[0]
+                else cursor_animation
+            )
+            cursor_image = get_animation_frame(
+                cursor_frames,
+                now - animation_started_at,
+            )
+            if cursor_image is not None:
+                screen.blit(cursor_image, pygame.mouse.get_pos())
 
         pygame.display.flip()
         clock.tick(FPS)
