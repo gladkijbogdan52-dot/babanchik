@@ -20,6 +20,7 @@ SLOTS_DIR = BASE_DIR / "slots"
 WIDTH = 1280
 HEIGHT = 720
 FPS = 60
+WINDOWED_SIZE = (WIDTH, HEIGHT)
 
 TITLE = "STAR CRASH"
 MENU_ITEMS = ("START", "SETTINGS", "EXIT")
@@ -71,6 +72,39 @@ def scale_to_fill(surface, size):
     y = (target_height - scaled_size[1]) // 2
     return scaled, (x, y)
 
+
+def open_display(fullscreen):
+    flags = pygame.FULLSCREEN if fullscreen else pygame.RESIZABLE
+    size = (0, 0) if fullscreen else WINDOWED_SIZE
+    return pygame.display.set_mode(size, flags)
+
+
+def prepare_scene_assets(screen, background_source, save_slots_background_source):
+    screen_size = screen.get_size()
+    background, background_pos = scale_to_fill(background_source, screen_size)
+    star_layer = pygame.Surface(screen_size, pygame.SRCALPHA)
+    ambient_stars = create_ambient_stars(
+        background_source,
+        screen_size,
+        background_pos,
+    )
+    cosmic_motes = create_cosmic_motes(screen_size)
+    save_slots_background, save_slots_background_pos = scale_to_fill(
+        save_slots_background_source,
+        screen_size,
+    )
+    fade_overlay = pygame.Surface(screen_size).convert()
+    fade_overlay.fill((0, 0, 0))
+    return (
+        background,
+        background_pos,
+        star_layer,
+        ambient_stars,
+        cosmic_motes,
+        save_slots_background,
+        save_slots_background_pos,
+        fade_overlay,
+    )
 
 def draw_text(screen, text, font, color, center):
     rendered = font.render(text, True, color)
@@ -402,6 +436,7 @@ def draw_save_slots(
     )
 
     mouse_pos = pygame.mouse.get_pos()
+    mouse_pressed = pygame.mouse.get_pressed()[0]
     slot_rects = make_save_slot_rects(screen_rect)
     # Hover is temporary and must not become the persistent slot selection.
     hovered_index = None
@@ -412,15 +447,17 @@ def draw_save_slots(
 
     for index, rect in enumerate(slot_rects):
         active = index == hovered_index
+        pressed = active and mouse_pressed
         confirmed = index == confirmed_index
-        button_center = (rect.centerx, rect.top + 44)
+        button_center = (rect.centerx, rect.top + (48 if pressed else 44))
         button_image = slot_button_background
         if button_image is not None:
             if active:
                 width, height = button_image.get_size()
+                scale = 0.98 if pressed else 1.05
                 button_image = pygame.transform.scale(
                     button_image,
-                    (round(width * 1.05), round(height * 1.05)),
+                    (round(width * scale), round(height * scale)),
                 )
             button_rect = button_image.get_rect(center=button_center)
             screen.blit(button_image, button_rect)
@@ -445,9 +482,10 @@ def draw_save_slots(
         if slot_image is not None:
             if active:
                 width, height = slot_image.get_size()
+                scale = 0.98 if pressed else 1.04
                 slot_image = pygame.transform.scale(
                     slot_image,
-                    (round(width * 1.04), round(height * 1.04)),
+                    (round(width * scale), round(height * scale)),
                 )
             image_rect = slot_image.get_rect(
                 center=button_center,
@@ -536,6 +574,7 @@ def draw_menu(
         draw_text(screen, TITLE, title_font, (230, 245, 245), (screen_rect.centerx, 170))
 
     mouse_pos = pygame.mouse.get_pos()
+    mouse_pressed = pygame.mouse.get_pressed()[0]
     button_rects = make_button_rects(screen_rect)
     custom_button_images = {
         "START": start_image,
@@ -569,37 +608,44 @@ def draw_menu(
 
     for index, (label, rect) in enumerate(zip(MENU_ITEMS, button_rects)):
         active = index == hovered_index
+        pressed = active and mouse_pressed
 
         button_image = custom_button_images.get(label)
         if button_image is not None:
+            draw_center = (rect.centerx, rect.centery + (5 if pressed else 0))
             if active:
                 width, height = button_image.get_size()
+                scale = 0.98 if pressed else 1.06
                 button_image = pygame.transform.scale(
                     button_image,
-                    (round(width * 1.06), round(height * 1.06)),
+                    (round(width * scale), round(height * scale)),
                 )
-            image_rect = button_image.get_rect(center=rect.center)
+            image_rect = button_image.get_rect(center=draw_center)
             screen.blit(button_image, image_rect)
             continue
 
         fill = (15, 29, 33, 210) if active else (9, 17, 21, 170)
         border = (244, 139, 46) if active else (69, 110, 116)
         text_color = (255, 230, 185) if active else (202, 220, 220)
-        button_rect = rect.inflate(18, 10) if active else rect.copy()
-        if active:
-            button_rect.move_ip(0, -4)
+        if pressed:
+            button_rect = rect.inflate(6, 2)
+            button_rect.move_ip(0, 4)
+        else:
+            button_rect = rect.inflate(18, 10) if active else rect.copy()
+            if active:
+                button_rect.move_ip(0, -4)
 
-        shadow_offset = 9 if active else 4
+        shadow_offset = 3 if pressed else 9 if active else 4
         shadow_rect = button_rect.move(0, shadow_offset)
         pygame.draw.rect(screen, (0, 0, 0, 170), shadow_rect, border_radius=7)
 
-        if active:
+        if active and not pressed:
             glow_rect = button_rect.inflate(8, 6)
             pygame.draw.rect(screen, (244, 139, 46), glow_rect, width=1, border_radius=8)
 
         pygame.draw.rect(screen, fill, button_rect, border_radius=6)
         pygame.draw.rect(screen, border, button_rect, width=2, border_radius=6)
-        if active:
+        if active and not pressed:
             pygame.draw.line(
                 screen,
                 (255, 226, 152),
@@ -615,24 +661,29 @@ def draw_menu(
 def run_menu():
     pygame.init()
     pygame.display.set_caption("Star Crash")
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    fullscreen = False
+    screen = open_display(fullscreen)
     pygame.mouse.set_visible(False)
     clock = pygame.time.Clock()
+    resize_events = {pygame.VIDEORESIZE}
+    for event_name in ("WINDOWRESIZED", "WINDOWMAXIMIZED", "WINDOWRESTORED"):
+        event_id = getattr(pygame, event_name, None)
+        if event_id is not None:
+            resize_events.add(event_id)
 
     background_source = pygame.image.load(BACKGROUND_PATH).convert()
-    background, background_pos = scale_to_fill(background_source, screen.get_size())
-    star_layer = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
-    ambient_stars = create_ambient_stars(
-        background_source,
-        screen.get_size(),
-        background_pos,
-    )
-    cosmic_motes = create_cosmic_motes(screen.get_size())
     save_slots_background_source = pygame.image.load(SAVE_SLOTS_BACKGROUND_PATH).convert()
-    save_slots_background, save_slots_background_pos = scale_to_fill(
-        save_slots_background_source,
-        screen.get_size(),
-    )
+    (
+        background,
+        background_pos,
+        star_layer,
+        ambient_stars,
+        cosmic_motes,
+        save_slots_background,
+        save_slots_background_pos,
+        fade_overlay,
+    ) = prepare_scene_assets(screen, background_source, save_slots_background_source)
+
     save_slot_button_animation = scale_animation_frames(
         trim_animation_frames(
             load_gif_animation(SAVE_SLOT_BUTTON_BACKGROUND_PATH)
@@ -692,8 +743,6 @@ def run_menu():
     transition_started_at = 0
     running = True
     animation_started_at = pygame.time.get_ticks()
-    fade_overlay = pygame.Surface(screen.get_size()).convert()
-    fade_overlay.fill((0, 0, 0))
 
     while running:
         now = pygame.time.get_ticks()
@@ -779,6 +828,49 @@ def run_menu():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN and (
+                event.key == pygame.K_F11
+                or (
+                    event.key == pygame.K_RETURN
+                    and getattr(event, "mod", 0) & pygame.KMOD_ALT
+                )
+            ):
+                fullscreen = not fullscreen
+                screen = open_display(fullscreen)
+                pygame.mouse.set_visible(False)
+                (
+                    background,
+                    background_pos,
+                    star_layer,
+                    ambient_stars,
+                    cosmic_motes,
+                    save_slots_background,
+                    save_slots_background_pos,
+                    fade_overlay,
+                ) = prepare_scene_assets(
+                    screen,
+                    background_source,
+                    save_slots_background_source,
+                )
+            elif event.type in resize_events:
+                if not fullscreen:
+                    if event.type == pygame.VIDEORESIZE and hasattr(event, "size"):
+                        screen = pygame.display.set_mode(event.size, pygame.RESIZABLE)
+                        pygame.mouse.set_visible(False)
+                    (
+                        background,
+                        background_pos,
+                        star_layer,
+                        ambient_stars,
+                        cosmic_motes,
+                        save_slots_background,
+                        save_slots_background_pos,
+                        fade_overlay,
+                    ) = prepare_scene_assets(
+                        screen,
+                        background_source,
+                        save_slots_background_source,
+                    )
             elif transition_phase is not None:
                 continue
             elif current_scene == "menu":
